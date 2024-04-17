@@ -1,0 +1,39 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+
+data = pd.read_csv('Reviews.csv')
+print(data.head())
+
+# Group by 'ProfileName' and count the occurrences
+profile_counts = data['ProfileName'].value_counts()
+
+# Get the profile names where the count is less than or equal to 50
+valid_profiles = profile_counts[profile_counts >= 50].index
+
+# Filter the DataFrame to keep only the rows where the 'ProfileName' is in the valid_profiles list
+filtered_df = data[data['ProfileName'].isin(valid_profiles)]
+
+# Get the feature names (e.g., one per word)
+vectorizer = CountVectorizer()
+count_matrix = vectorizer.fit_transform(filtered_df['Text'])
+
+# Get the feature names (e.g., one per word)
+features = vectorizer.get_feature_names_out()
+
+# Make a new DataFrame with the counts information
+profile_data = pd.DataFrame(count_matrix.toarray(),
+        index=filtered_df.index,
+        columns=features)
+
+
+# Add the old columns to our new DataFrame.
+# We won't use review_clean and the summary in our model, but we will keep
+# them to look at later.
+profile_data['ProfileName'] = filtered_df['ProfileName']
+profile_data['Text'] = filtered_df['Text']
+profile_data['Score'] = filtered_df['Score']
+profile_data = profile_data.sort_values(by='ProfileName')
+
+# Make a new DataFrame with the counts information
+print(profile_data.head())
