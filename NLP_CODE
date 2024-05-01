@@ -1,15 +1,20 @@
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
 
 data = pd.read_csv('Reviews.csv')
-print(data.head())
 
 # Group by 'ProfileName' and count the occurrences
 profile_counts = data['ProfileName'].value_counts()
 
-# Get the profile names where the count is less than or equal to 50
-valid_profiles = profile_counts[profile_counts >= 50].index
+# Get the profile names where the count is less than or equal to 100
+valid_profiles = profile_counts[profile_counts >= 120].index
 
 # Filter the DataFrame to keep only the rows where the 'ProfileName' is in the valid_profiles list
 filtered_df = data[data['ProfileName'].isin(valid_profiles)]
@@ -18,13 +23,15 @@ filtered_df = data[data['ProfileName'].isin(valid_profiles)]
 vectorizer = CountVectorizer()
 count_matrix = vectorizer.fit_transform(filtered_df['Text'])
 
+filtered_df['Sentiment'] = filtered_df['Score'].apply(lambda score : +1 if score > 3 else -1)
+
 # Get the feature names (e.g., one per word)
 features = vectorizer.get_feature_names_out()
 
 # Make a new DataFrame with the counts information
 profile_data = pd.DataFrame(count_matrix.toarray(),
-        index=filtered_df.index,
-        columns=features)
+                            index=filtered_df.index,
+                            columns=features)
 
 
 # Add the old columns to our new DataFrame.
@@ -33,7 +40,57 @@ profile_data = pd.DataFrame(count_matrix.toarray(),
 profile_data['ProfileName'] = filtered_df['ProfileName']
 profile_data['Text'] = filtered_df['Text']
 profile_data['Score'] = filtered_df['Score']
+profile_data['Sentiment'] = filtered_df['Sentiment']
 profile_data = profile_data.sort_values(by='ProfileName')
 
-# Make a new DataFrame with the counts information
 print(profile_data.head())
+print(len(profile_data))
+
+
+train_data, test_and_validation_data = train_test_split(profile_data,
+                                                        test_size=0.2,
+                                                        random_state=3)
+validation_data, test_data = train_test_split(test_and_validation_data,
+                                              test_size=0.5, random_state=3)
+
+sentiment_model = LogisticRegression(penalty='l2', C=1e23, random_state=1)
+sentiment_model.fit(train_data[features], train_data['Sentiment'])
+
+coefficients = sentiment_model.coef_
+
+
+data_coef = pd.DataFrame(coefficients[0])
+
+index_neg = data_coef[0].idxmin()
+index_pos = data_coef[0].idxmax()
+
+most_negative_word = train_data[features].columns[index_neg]
+most_positive_word = train_data[features].columns[index_pos]
+
+print('Most negative word:', most_negative_word)
+print('Most positive word:', most_positive_word)
+
+
+# TODO Find the review_clean values for the most positive and most negative review
+
+probability = sentiment_model.predict_proba(validation_data[features])
+
+prob_data = pd.DataFrame(probability)
+
+index_neg = prob_data[0].idxmax()
+index_pos = prob_data[1].idxmax()
+
+most_positive_review = validation_data['Text'].iloc[index_pos]
+most_negative_review = validation_data['Text'].iloc[index_neg]
+
+print(most_positive_review)
+print(most_negative_review)
+
+# TODO Find the validation accuracy of the sentiment model
+
+y_predict = sentiment_model.predict(validation_data[features])
+y_true = validation_data['sentiment']
+sentiment_model_validation_accuracy = accuracy_score(y_true, y_predict)
+print(sentiment_model_validation_accuracy)
+
+# Make a new DataFrame with the counts information
