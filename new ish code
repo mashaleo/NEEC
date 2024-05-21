@@ -1,0 +1,236 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score 
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.stem.wordnet import WordNetLemmatizer
+import gensim
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
+# PREPROCESSING
+nltk.download('stopwords')
+
+data = pd.read_csv('Reviews.csv')
+print(data.head())
+
+# Group by 'ProfileName' and count the occurrences
+profile_counts = data['ProfileName'].value_counts()
+
+# Get the profile names where the count is less than or equal to 50
+valid_profiles = profile_counts[profile_counts >= 100].index
+
+
+# Filter the DataFrame to keep only the rows where the 'ProfileName' is in the valid_profiles list
+filtered_df = data[data['ProfileName'].isin(valid_profiles)]
+
+# Give reviews with Score>3 a positive rating, and reviews with score<3 a negative rating
+def classify_score(score):
+    if score < 3:
+        return 'negative'
+    else:
+        return 'positive'
+
+actualScore = filtered_df['Score']
+positiveNegative = actualScore.map(classify_score)
+filtered_df['Score'] = positiveNegative
+
+sorted_data = filtered_df.sort_values('ProfileName', axis=0, ascending=True)
+sorted_data.head
+
+#removing duplicate entries
+final = sorted_data.drop_duplicates(subset={"UserId", "ProfileName" ,"Time", "Text"}, keep = 'first', inplace = False)
+final.shape
+
+final = final[final.HelpfulnessNumerator <= final.HelpfulnessDenominator]
+print(final.shape)
+
+count_vect = CountVectorizer()
+final = final.sort_values(by = 'Time')
+final_counts = count_vect.fit_transform(final['Text'].values)
+
+
+stop = set(stopwords.words('english'))  # set of stopwords
+sno = nltk.stem.SnowballStemmer('english')  # initilizes snowball stemmer
+
+
+def cleanhtml(sentence):
+    cleanr = re.compile('<.*?>')
+    cleantext = re.sub(cleanr, ' ', sentence)
+    return cleantext
+
+
+def cleanpunc(sentence):
+    cleaned = re.sub(r'[?|!|\'|"|#]', r'', sentence)
+    cleaned = re.sub(r'[.|,|)|(|\|/]', r' ', cleaned)
+    return cleaned
+
+i = 0
+strl= ' '
+final_string = []
+all_positive_words = []
+all_negative_words = []
+s=''
+for sent in final['Text'].values:
+    filtered_sentence = []
+    sent=cleanhtml(sent)
+    for w in sent.split():
+        for cleaned_words in cleanpunc(w).split():
+            if((cleaned_words.isalpha()) & (len(cleaned_words)>2)):
+                if(cleaned_words.lower() not in stop):
+                    s=(sno.stem(cleaned_words.lower())).encode('utf8')
+                    filtered_sentence.append(s)
+                    if (final['Score'].values)[i] == 'positive':
+                        
+                        all_positive_words.append(s)
+                    if (final['Score'].values)[i] == 'negative':
+                        all_negative_words.append(s) 
+                else:
+                    continue
+            else:
+                continue
+                
+    #print(filtered_sentence)
+    str1 = b" ".join(filtered_sentence) #final string of cleaned words
+    
+    final_string.append(str1)
+    i+=1
+print(final['Text'])
+
+
+
+
+###################################
+# Vectorizing!
+
+
+
+# TF-IDF
+tf_idf_vect = TfidfVectorizer(ngram_range=(1, 2))
+final_tf_idf = tf_idf_vect.fit_transform(final['Text'].values)
+
+features = tf_idf_vect.get_feature_names_out()
+len(features)
+print(features)
+
+def top_tfidf_feats(row, features, top_n=25):
+    topn_ids = np.argsort(row)[::-1][:top_n]
+    top_feats = [(features[i], row[i]) for i in topn_ids]
+    df = pd.DataFrame(top_feats)
+    df.columns = ['feature', 'tfidf']
+    return df
+
+top_tfidf = top_tfidf_feats(final_tf_idf[1,:].toarray()[0],features,25)
+print(top_tfidf.head())
+
+# Word2Vec
+list_of_sent = []
+for sent in final['Text'].values:
+    filtered_sentence = []
+    # Perform text cleaning here
+    sent = cleanhtml(sent)
+    for w in sent.split():
+        for cleaned_word in cleanpunc(w).split():
+            if cleaned_word.isalpha():  # Corrected variable name
+                filtered_sentence.append(cleaned_word.lower())  # Corrected variable name
+    list_of_sent.append(filtered_sentence)
+
+print(list_of_sent[1])
+
+w2v_model = gensim.models.Word2Vec(list_of_sent, min_count=5, vector_size=50, workers=4)
+# Get the dimensions of word vectors
+vector_size = w2v_model.vector_size
+
+words = list(w2v_model.wv.key_to_index)
+
+# Extract the vectors
+vectors = [w2v_model.wv[word] for word in words]
+
+# Create a DataFrame
+df_word_vectors = pd.DataFrame(vectors, index=words)
+
+# Set column names for better readability (optional)
+df_word_vectors.columns = [f'vector_{i}' for i in range(df_word_vectors.shape[1])]
+
+print(words[:5])
+
+# Display the DataFrame
+print(df_word_vectors.head())
+
+similar_words = w2v_model.wv.most_similar('kiwi')
+print(similar_words)
+
+similar_words = w2v_model.wv.most_similar('allergies')
+print(similar_words)
+
+sent_vectors = []
+for sent in list_of_sent:
+    sent_vec = np.zeros(50)
+    cnt_words = 0
+    for word in sent:
+        try:
+            vec = w2v_model.wv[word]
+            sent_vec += vec
+            cnt_words += 1
+        except:
+            pass
+    sent_vec /= cnt_words
+    sent_vectors.append(sent_vec)
+print(len(sent_vectors))
+print(len(sent_vectors[0]))
+
+tfidf_feat = tf_idf_vect.get_feature_names_out()
+
+tfidf_sent_vectors = []
+row = 0
+
+
+
+
+
+for sent in list_of_sent:
+    sent_vec = np.zeros(50)
+    weighted_sum = 0
+
+    for word in sent:
+        try:
+            vec = w2v_model.wv(word)
+            # obtain the tf_idf of a word in a sentence/review
+            tfidf = final_tf_idf[row, tfidf_feat.index(word)]
+            sent_vec += (vec * tfidf)
+            weighted_sum += tfidf
+        except:
+            pass
+
+    sent_vec /= weighted_sum
+    tfidf_sent_vectors.append(sent_vec)
+    row += 1
+
+print(tfidf_sent_vectors[0])
+
+
+
+
+
+######################
+# Logistic Regression
+
+# # profile_data = pd.DataFrame(df_word_vectors,
+# #                             index=words,
+# #                             columns=features)
+
+
+
+# # profile_data['ProfileName'] = filtered_df['ProfileName']
+# # profile_data['Text'] = filtered_df['Text']
+# # profile_data['Score'] = filtered_df['Score']
+# # profile_data['Sentiment'] = filtered_df['Sentiment']
+# # profile_data = profile_data.sort_values(by='ProfileName')
+
+# # print(profile_data.head())
+# # print(len(profile_data))
