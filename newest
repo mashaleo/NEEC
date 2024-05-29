@@ -1,0 +1,169 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+from gensim.models import Word2Vec 
+import matplotlib.pyplot as plt
+
+
+
+data = pd.read_csv(r"C:\Users\masha\git\NEEC\Reviews.csv")
+print(data.head())
+
+# Group by 'ProfileName' and count the occurrences
+profile_counts = data['ProfileName'].value_counts()
+
+# Get the profile names where the count is less than or equal to 50
+valid_profiles = profile_counts[profile_counts >= 100].index
+
+
+# Filter the DataFrame to keep only the rows where the 'ProfileName' is in the valid_profiles list
+filtered_df = data[data['ProfileName'].isin(valid_profiles)]
+
+#change score value to "poitive" or "negative"
+def classify_score(score):
+    if score < 3:
+        return 'negative'
+    else:
+        return 'positive'
+
+#update score
+actualScore = filtered_df['Score']
+positiveNegative = actualScore.map(classify_score)
+filtered_df['Score'] = positiveNegative
+
+filtered_df.shape
+filtered_df.head
+
+#sorting data according to ProfileName
+sorted_data=filtered_df.sort_values('ProfileName', axis=0, ascending=True)
+sorted_data.head
+
+#removing duplicate entries
+final=sorted_data.drop_duplicates(subset={"UserId","ProfileName","Time","Text"}, keep='first', inplace=False)
+final.shape
+
+#keep entries where helfulness numerator is higher than denominator
+final=final[final.HelpfulnessNumerator<=final.HelpfulnessDenominator]
+print(final.shape)
+
+#number of positive vs. negative reviews
+final['Score'].value_counts()
+
+#Bag of Words
+# Counts occurrence of each word out of total existing words throughout dataset
+count_vect = CountVectorizer()
+final = final.sort_values(by='Time')
+final_counts = count_vect.fit_transform(final['Text'].values)
+
+type(final_counts)
+
+final_counts.get_shape
+
+final.columns
+
+#Text Preprocessing: Stemming, stop-word removal and Lemmatization
+# re module provides support for working with regular expressions--tools for pattern matching and string manipulation
+# regular expressions are sequences of characters that define a search pattern
+# in this case re is searching though the dataset for sequences that contin HTML tags
+import re
+
+i=0;
+for sent in final['Text'].values:
+    if(len(re.findall('<.*?>', sent))):
+        print(i)
+        print(sent)
+        break;
+i += 1;
+
+# stopwords: common words that are often removed to improve efficiency (articles, conjunctions, prepositions, pronouns, common verbs)
+# initializes a set of stopwords from english language, converts it into set
+#  stemming: process of reducing words to root or base form by removing suffixes or prefixes
+# snowball is an algorithmic stemmer sno is a variable assigned to stnowball object
+
+import string
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.stem.wordnet import WordNetLemmatizer
+
+stemmer = PorterStemmer()
+stop_words = set(stopwords.words('english'))
+
+# function that removes HTML tags
+# function that removes punctuation
+
+def cleanhtml(sentence):
+    cleanr = re.compile('<.*?>')
+    return re.sub(cleanr, ' ', sentence)
+
+def cleanpunc(sentence):
+    return re.sub(r'[?|!|\'|"|#]|[.|,|)|(|\|/]', r' ', sentence)
+
+def preprocess_text(text):
+    text = cleanhtml(text)
+    words = []
+    for w in text.split():
+        for cleaned_word in cleanpunc(w).split():
+            if cleaned_word.isalpha():
+                stemmed_word = stemmer.stem(cleaned_word.lower())
+                if stemmed_word not in stop_words:
+                    words.append(stemmed_word)
+    return ' '.join(words)
+
+final['Preprocessed_Text'] = final['Text'].apply(preprocess_text)
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+import gensim
+from nltk.stem import PorterStemmer
+from nltk.corpus import stopwords
+
+tf_idf_vect = TfidfVectorizer(ngram_range=(1,2))
+final_tf_idf = tf_idf_vect.fit_transform(final['Preprocessed_Text'].values)
+features = tf_idf_vect.get_feature_names_out()
+
+list_of_sent = []
+for sent in final['Preprocessed_Text'].values:
+    list_of_sent.append(sent.split())
+
+w2v_model = gensim.models.Word2Vec(list_of_sent, min_count=5, vector_size=50, workers=4)
+
+tfidf_feat = tf_idf_vect.get_feature_names_out()
+
+tfidf_word2vec_sum = []
+for i, sent in enumerate(list_of_sent):
+    sent_vec = np.zeros(w2v_model.vector_size)
+    weighted_sum = 0
+    
+    # Get TF-IDF vector indices for the current review
+    review_tfidf_indices = final_tf_idf[i].nonzero()[1]
+    
+    for word_index in review_tfidf_indices:
+        word = tfidf_feat[word_index]
+        
+        try:
+            # Get Word2Vec vector
+            vec = w2v_model.wv[word]
+            
+            # Get TF-IDF weight of the word in the review
+            tfidf = final_tf_idf[i, word_index]
+            
+            # Update the weighted sum and the weighted sum of Word2Vec vectors
+            sent_vec += vec * tfidf
+            weighted_sum += tfidf
+        except KeyError:
+            # Word not in Word2Vec vocabulary
+            continue
+    if weighted_sum > 0:
+        sent_vec /= weighted_sum
+
+    tfidf_word2vec_sum.append(sent_vec)
+
+print(tfidf_word2vec_sum)
+len(tfidf_word2vec_sum)
+
+final['TFIDF_Word2Vec_Sum'] = tfidf_word2vec_sum
+
+
+
+
+
