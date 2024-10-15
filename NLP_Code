@@ -1,0 +1,338 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score 
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.stem.wordnet import WordNetLemmatizer
+import gensim
+import re
+import scipy
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+# PREPROCESSING
+nltk.download('stopwords')
+
+data = pd.read_csv('Reviews.csv')
+print(data.head())
+
+# Group by 'ProfileName' and count the occurrences
+profile_counts = data['ProfileName'].value_counts()
+
+# Get the profile names where the count is less than or equal to 50
+valid_profiles = profile_counts[profile_counts >= 100].index
+
+# Filter the DataFrame to keep only the rows where the 'ProfileName' is in the valid_profiles list
+filtered_df = data[data['ProfileName'].isin(valid_profiles)]
+
+print(filtered_df.shape)
+
+# Give reviews with Score>3 a positive rating, and reviews with score<3 a negative rating
+def classify_score(score):
+    if score < 3:
+        return 0
+    else:
+        return 1
+
+
+actualScore = filtered_df['Score']
+positiveNegative = actualScore.map(classify_score)
+filtered_df['Score'] = positiveNegative
+
+sorted_data = filtered_df.sort_values('ProfileName', axis=0, ascending=True)
+sorted_data.head
+
+# removing duplicate entries
+final = sorted_data.drop_duplicates(subset={"UserId", "ProfileName" ,"Time", "Text"}, keep = 'first', inplace = False)
+print(final["Score"])
+
+# Separate positive and negative samples
+positive_samples = final[final['Score'] == 1]
+negative_samples = final[final['Score'] == 0]
+
+print(positive_samples, negative_samples)
+
+# Randomly sample from positive samples to match the number of negative samples
+positive_sampled = positive_samples.sample(n=len(negative_samples), random_state=42)
+
+# Combine the sampled positive samples with the negative samples
+balanced_df = pd.concat([positive_sampled, negative_samples])
+
+# Shuffle the dataset to mix positive and negative samples
+balanced_df = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+# Display the counts after balancing
+score_counts_balanced = balanced_df['Score'].value_counts()
+print("Score Counts after sampling:", score_counts_balanced)
+
+final = balanced_df
+
+final = final[final.HelpfulnessNumerator <= final.HelpfulnessDenominator]
+print(final.shape)
+
+score_counts = final['Score'].value_counts()
+
+# Display the counts
+
+count_vect = CountVectorizer()
+final = final.sort_values(by = 'Time')
+final_counts = count_vect.fit_transform(final['Text'].values)
+
+
+stop = set(stopwords.words('english'))  # set of stopwords
+sno = nltk.stem.SnowballStemmer('english')  # initilizes snowball stemmer
+
+# Function to clean html
+def cleanhtml(sentence):
+    cleanr = re.compile('<.*?>')
+    cleantext = re.sub(cleanr, ' ', sentence)
+    return cleantext
+
+# Function to remove punctuation 
+def cleanpunc(sentence):
+    cleaned = re.sub(r'[?|!|\'|"|#]', r'', sentence)
+    cleaned = re.sub(r'[.|,|)|(|\|/]', r' ', cleaned)
+    return cleaned
+
+
+print(final['Text'].head(1))
+
+i=0
+strl=' '
+final_string=[]
+all_positive_words=[]
+all_negative_words=[]
+list_of_sent = []
+
+for i, sent in enumerate(final['Text']):
+    filtered_sentence = []
+    # Clean HTML tags from the sentence
+    sent = cleanhtml(sent)
+    # Split the sentence into words
+    for w in sent.split():
+        # Clean punctuation from each word
+        for cleaned_word in cleanpunc(w).split():
+            # Check if the word is alphabetic and has more than 2 characters
+            if cleaned_word.isalpha() and len(cleaned_word) > 2:
+                word_lower = cleaned_word.lower()
+                # Check if the word is not a stop word
+                if word_lower not in stop:
+                    # Stem the word
+                    stemmed_word = sno.stem(word_lower)
+                    filtered_sentence.append(stemmed_word)
+                    # Classify words based on sentiment
+                    if final['Score'].values[i] == 1:
+                        all_positive_words.append(stemmed_word)
+                    elif final['Score'].values[i] == -1:
+                        all_negative_words.append(stemmed_word)
+    # Add the filtered sentence to the list of sentences
+    list_of_sent.append(filtered_sentence)
+    # Convert the filtered sentence to a single UTF-8 encoded string
+    str1 = " ".join(filtered_sentence).encode('utf-8')
+    # Add the final string to the list of cleaned strings
+    final_string.append(str1)
+
+final['CleanedText']=final_string
+print([final_string[0]])
+
+final.head(3)
+
+###################################
+# Vectorizing!
+
+
+
+# TF-IDF
+tf_idf_vect = TfidfVectorizer(ngram_range=(1, 2), max_df = 0.85)
+final_tf_idf = tf_idf_vect.fit_transform(final['CleanedText'])
+
+features = tf_idf_vect.get_feature_names_out()
+len(features)
+print(features)
+
+def top_tfidf_feats(row, features):
+    topn_ids = np.argsort(row)[::-1]
+    top_feats = [(features[i], row[i]) for i in topn_ids]
+    df = pd.DataFrame(top_feats)
+    df.columns = ['feature', 'tfidf']
+    return df
+
+top_tfidf = top_tfidf_feats(final_tf_idf[:].toarray()[0], features)
+print(top_tfidf)
+
+# Word2Vec
+
+# list_of_sent = []
+# for sent in final['Text']:
+#     filtered_sentence = []
+#     # Perform text cleaning here
+#     sent = cleanhtml(sent)
+#     for w in sent.split():
+#         for cleaned_word in cleanpunc(w).split():
+#             if cleaned_word.isalpha():  # Corrected variable name
+#                 filtered_sentence.append(cleaned_word.lower())  # Corrected variable name
+#     list_of_sent.append(filtered_sentence)
+
+# print(list_of_sent[1])
+
+w2v_model = gensim.models.Word2Vec(list_of_sent, min_count=5, vector_size=50, workers=4)
+# Get the dimensions of word vectors
+vector_size = w2v_model.vector_size
+
+words = list(w2v_model.wv.key_to_index)
+
+# Extract the vectors
+vectors = [w2v_model.wv[word] for word in words]
+print(vectors[0])
+
+# # # Create a DataFrame
+# df_word_vectors = pd.DataFrame(vectors, index=words)
+
+# # # Set column names for better readability (optional)
+# df_word_vectors.columns = [f'vector_{i}' for i in range(df_word_vectors.shape[1])]
+
+# # print(words[:5])
+
+# # # Display the DataFrame
+# # print(df_word_vectors.head())
+
+# # similar_words = w2v_model.wv.most_similar('kiwi')
+# # print(similar_words)
+
+# # similar_words = w2v_model.wv.most_similar('allergies')
+# # print(similar_words)
+
+list_of_sent = []
+for sent in final['CleanedText'].values:
+    list_of_sent.append(sent.split())
+
+tfidf_word2vec_sum = []
+words_in_tfidf = []
+
+for i, sent in enumerate(list_of_sent):
+    sent_vec = np.zeros(w2v_model.vector_size)
+    weighted_sum = 0
+    
+    # Get TF-IDF vector indices for the current review
+    review_tfidf_indices = final_tf_idf[i].nonzero()[1]
+
+    for word_index in review_tfidf_indices:
+        word = features[word_index]
+        words_in_tfidf.append(word)
+
+        try:
+            # Get Word2Vec vector
+            vec = w2v_model.wv[word]
+            
+            # Get TF-IDF weight of the word in the review
+            tfidf = final_tf_idf[i, word_index]
+            
+            # Update the weighted sum and the weighted sum of Word2Vec vectors
+            sent_vec += vec * tfidf
+            weighted_sum += tfidf
+        except KeyError:
+            # Word not in Word2Vec vocabulary
+            continue
+    if weighted_sum > 0:
+        sent_vec /= weighted_sum
+
+    tfidf_word2vec_sum.append(sent_vec)
+
+
+
+print(tfidf_word2vec_sum[0])
+print(len(tfidf_word2vec_sum))
+
+tfidf_word2vec_sum_array = np.array(tfidf_word2vec_sum)
+
+w2v_df = pd.DataFrame(tfidf_word2vec_sum_array, columns=[f'feature_{i}' for i in range(tfidf_word2vec_sum_array.shape[1])])
+
+w2v_df = pd.concat([final['Score'].reset_index(drop=True), w2v_df], axis=1)
+
+
+def feature_selection(file):
+    features = list(file.columns)
+    features_to_remove = ['Score']
+    for col in features_to_remove:
+        features.remove(col)
+        return features
+
+
+features = feature_selection(w2v_df)
+print(features)
+
+print(w2v_df.head())
+print(w2v_df.shape)
+
+# Combine TF-IDF and Word2Vec features if needed
+# Here we demonstrate using only TF-IDF features; you can adapt this to combine both features if required
+
+######################
+# Logistic Regression
+
+X = w2v_df[features]
+print(len(X))
+y = w2v_df['Score']  # Ensure this is the target variable with correct labels
+print(len(y))
+
+# Split the data
+train_data, test_and_validation_data = train_test_split(w2v_df, test_size=0.2, random_state=42)
+
+# Further split the training set into training and validation sets (80% train, 20% validation)
+validation_data, test_data = train_test_split(test_and_validation_data, test_size=0.5, random_state=42)
+
+# Initialize the Logistic Regression model and train it
+logreg = LogisticRegression().fit(train_data[features], train_data['Score'])
+
+probability = logreg.predict_proba(validation_data[features])
+
+prob_data = pd.DataFrame(probability)
+
+# Find the validation accuracy of the sentiment model
+
+y_predict = logreg.predict(validation_data[features])
+y_true = validation_data['Score']
+sentiment_model_validation_accuracy = accuracy_score(y_true, y_predict)
+print('Sentiment model validation accuracy with no penalty:', sentiment_model_validation_accuracy)
+
+
+# Set up an empty list to store the accuracies (will convert to DataFrame after loop)
+l2_penalties = [0.01, 1, 4, 10, 1e2, 1e3, 1e4, 1e5]
+l2_penalty_names = [f'coefficients [L2={l2_penalty:.0e}]' 
+                    for l2_penalty in l2_penalties]
+
+
+accuracy_data = []
+for l2_penalty, l2_penalty_column_name in zip(l2_penalties, l2_penalty_names):
+    # TODO(Q6 and Q7): Train the model. Remember to pass `fit_intercept=False` and `random_state=1` to the model.
+    log_regr = LogisticRegression(penalty='l2', fit_intercept=False, random_state=42, C=(1/l2_penalty))
+    log_regr.fit(train_data[features], train_data['Score'])
+
+    # TODO(Q7): Calculate and save the train and validation accuracies
+    validation_accuracy = accuracy_score(log_regr.predict(validation_data[features]), validation_data['Score'])
+    train_accuracy = accuracy_score(log_regr.predict(train_data[features]), train_data['Score'])
+    accuracy_data.append({'l2_penalty': l2_penalty,'train_accuracy': train_accuracy,'validation_accuracy': validation_accuracy})
+
+accuracies_table = pd.DataFrame(accuracy_data)
+
+print(accuracies_table)
+
+log_regr = LogisticRegression(penalty='l2', fit_intercept=False, random_state=42, C=(1/100)).fit(train_data[features], train_data['Score'])
+predictions = log_regr.predict(validation_data[features])
+print(predictions)
+
+validation_accuracy = accuracy_score(log_regr.predict(validation_data[features]), validation_data['Score'])
+print('Sentiment model with penalty of lambda = 100', validation_accuracy)
+
+score_counts = np.bincount(predictions)
+
+test_accuracy = accuracy_score(log_regr.predict(test_data[features]), test_data['Score'])
+print('Test accuracy:', test_accuracy)
+
+print(log_regr.predict_proba(test_data[features]))
+
+# Display the counts
+print("Score Counts:", score_counts)
