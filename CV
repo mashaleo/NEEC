@@ -1,0 +1,88 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.preprocessing import normalize
+from scipy.cluster.hierarchy import dendrogram, linkage
+import matplotlib.pyplot as plt
+import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem.snowball import SnowballStemmer
+
+# Download stopwords if you haven't already
+nltk.download('stopwords')
+
+# Load your data (replace 'Reviews.csv' with your actual file path)
+data = pd.read_csv('Reviews.csv')
+
+# Filter profiles and perform preprocessing as per your original process
+profile_counts = data['ProfileName'].value_counts()
+valid_profiles = profile_counts[profile_counts >= 100].index
+filtered_df = data[data['ProfileName'].isin(valid_profiles)]
+
+# Classify scores into positive/negative
+def classify_score(score):
+    if score < 3:
+        return 0
+    else:
+        return 1
+
+filtered_df['Score'] = filtered_df['Score'].map(classify_score)
+
+# Removing duplicates
+final = filtered_df.drop_duplicates(subset=["UserId", "ProfileName", "Time", "Text"], keep='first')
+
+# Preprocess the text data
+stop = set(stopwords.words('english'))  # Set of stopwords
+sno = SnowballStemmer('english')  # Initialize Snowball Stemmer
+
+# Function to clean HTML tags
+def cleanhtml(sentence):
+    cleanr = re.compile('<.*?>')
+    return re.sub(cleanr, ' ', sentence)
+
+# Function to remove punctuation
+def cleanpunc(sentence):
+    return re.sub(r'[?|!|\'|"|#]', r'', sentence)
+
+# Preprocess the 'Text' column
+final_string = []
+list_of_sent = []
+
+for sent in final['Text']:
+    filtered_sentence = []
+    sent = cleanhtml(sent)
+    for w in sent.split():
+        for cleaned_word in cleanpunc(w).split():
+            if cleaned_word.isalpha() and len(cleaned_word) > 2:
+                word_lower = cleaned_word.lower()
+                if word_lower not in stop:
+                    stemmed_word = sno.stem(word_lower)
+                    filtered_sentence.append(stemmed_word)
+    list_of_sent.append(filtered_sentence)
+    final_string.append(" ".join(filtered_sentence))
+
+# Add the cleaned text back into the DataFrame
+final['CleanedText'] = final_string
+
+# Step 1: Vectorize the cleaned text using CountVectorizer
+count_vect = CountVectorizer()
+final_counts = count_vect.fit_transform(final['CleanedText'].values)
+
+# Step 2: Normalize the document-term matrix (optional)
+final_counts_normalized = normalize(final_counts)
+
+# Step 3: Perform hierarchical clustering using Ward's method
+Z = linkage(final_counts_normalized.toarray(), method='ward')
+
+# Step 4: Plot the dendrogram
+plt.figure(figsize=(10, 7))
+plt.title("Dendrogram for Hierarchical Clustering of Reviews")
+plt.xlabel('Sample Index')
+plt.ylabel('Distance')
+
+# Create and plot the dendrogram
+dendrogram(Z)
+
+# Show the plot
+plt.show()
