@@ -72,8 +72,10 @@ final_counts = count_vect.fit_transform(final['CleanedText'].values)
 # Step 2: Normalize the document-term matrix (optional)
 final_counts_normalized = normalize(final_counts)
 
-# Step 3: Perform hierarchical clustering using Ward's method
-Z = linkage(final_counts_normalized.toarray(), method='ward')
+from sklearn.decomposition import PCA
+
+pca = PCA(n_components=50)  # Reduce to 100 dimensions
+final_counts_pca = pca.fit_transform(final_counts_normalized.toarray())
 
 # Step 4: Plot the dendrogram
 plt.figure(figsize=(10, 7))
@@ -86,3 +88,27 @@ dendrogram(Z)
 
 # Show the plot
 plt.show()
+
+from scipy.cluster.hierarchy import fcluster
+
+max_distance = 15  # Example threshold distance for cutting
+clusters = fcluster(Z, max_distance, criterion='distance')
+
+# Alternatively, you can extract a specific number of clusters
+clusters = fcluster(Z, t=5, criterion='maxclust')  # Example for 5 clusters
+
+final['Cluster'] = clusters
+# View the number of reviews in each cluster
+print(final['Cluster'].value_counts())
+
+# Example: Print reviews from a specific cluster
+cluster_1_reviews = final[final['Cluster'] == 1]
+print(cluster_1_reviews[['Text', 'Score']].head())
+
+explained_variance = np.sum(pca.explained_variance_ratio_)
+print(f'Total variance explained by the first 100 components: {explained_variance:.2f}')
+
+from sklearn.metrics import silhouette_score
+
+silhouette_avg = silhouette_score(final_counts_pca, clusters)
+print(f'Silhouette Score: {silhouette_avg:.2f}')
