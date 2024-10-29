@@ -73,9 +73,10 @@ final_counts = count_vect.fit_transform(final['CleanedText'].values)
 final_counts_normalized = normalize(final_counts)
 
 from sklearn.decomposition import PCA
-
-pca = PCA(n_components=50)  # Reduce to 100 dimensions
+pca = PCA(n_components=50)  # Reduce to 50 dimensions
 final_counts_pca = pca.fit_transform(final_counts_normalized.toarray())
+
+Z = linkage(final_counts_pca, method='ward')
 
 # Step 4: Plot the dendrogram
 plt.figure(figsize=(10, 7))
@@ -89,17 +90,97 @@ dendrogram(Z)
 # Show the plot
 plt.show()
 
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.cluster.hierarchy import fcluster
+from sklearn.metrics import pairwise_distances_argmin_min
+
+# Function to calculate WSS (Within-Cluster Sum of Squares)
+def calculate_wss(data, clusters):
+    wss = 0
+    for cluster_num in np.unique(clusters):
+        cluster_data = data[clusters == cluster_num]
+        centroid = np.mean(cluster_data, axis=0)
+        wss += np.sum((cluster_data - centroid) ** 2)
+    return wss
+
+
+# List to store WSS values for each number of clusters
+wss_values = []
+
+# Trying different numbers of clusters (e.g., from 2 to 10)
+cluster_range = range(2, 11)  # You can extend this range if needed
+
+
+for k in cluster_range:
+    # Create clusters using fcluster with maxclust criterion
+    clusters = fcluster(Z, t=k, criterion='maxclust')
+    
+    # Calculate WSS for the current number of clusters
+    wss = calculate_wss(final_counts_pca, clusters)
+    
+    # Append WSS value to the list
+    wss_values.append(wss)
+    
+    print(f'For {k} clusters, WSS is: {wss:.2f}')
+
+
+
+# Plotting WSS vs Number of Clusters (Elbow Method)
+plt.figure(figsize=(10, 6))
+plt.plot(cluster_range, wss_values, marker='o')
+plt.title('Elbow Method for Optimal Clusters')
+plt.xlabel('Number of Clusters')
+plt.ylabel('WSS (Within-Cluster Sum of Squares)')
+plt.grid(True)
+plt.show()
+
+final['Cluster'] = fcluster(Z, t=10, criterion='maxclust')
+
+for cluster_num in range(1, 11):
+    cluster_reviews = final[final['Cluster'] == cluster_num]
+    cluster_words = " ".join(cluster_reviews['CleanedText'])
+    print(f"Most common words in cluster {cluster_num}:")
+    from collections import Counter
+    word_counts = Counter(cluster_words.split())
+    print(word_counts.most_common(10))  # Top 10 most frequent words
+
+for cluster_num in range(1, 10):
+    cluster_reviews = final[final['Cluster'] == cluster_num]
+    pos_reviews = cluster_reviews[cluster_reviews['Score'] == 1].shape[0]
+    neg_reviews = cluster_reviews[cluster_reviews['Score'] == 0].shape[0]
+    print(f"Cluster {cluster_num}: {pos_reviews} positive reviews, {neg_reviews} negative reviews")
+
+final['ReviewLength'] = final['CleanedText'].apply(lambda x: len(x.split()))
+for cluster_num in range(1, 5):
+    avg_length = final[final['Cluster'] == cluster_num]['ReviewLength'].mean()
+    print(f"Average review length in cluster {cluster_num}: {avg_length}")
+
+from sklearn.decomposition import PCA
+import seaborn as sns
+
+# Reduce PCA to 2 dimensions for visualization
+pca_2d = PCA(n_components=2)
+final_counts_2d = pca_2d.fit_transform(final_counts_normalized.toarray())
+
+# Plot the clusters
+plt.figure(figsize=(10, 7))
+sns.scatterplot(x=final_counts_2d[:, 0], y=final_counts_2d[:, 1], hue=final['Cluster'], palette="viridis")
+plt.title("Visualization of 4 Clusters")
+plt.show()
+
+for cluster_num in range(1, 5):
+    print(f"\nCluster {cluster_num} sample reviews:")
+    print(final[final['Cluster'] == cluster_num][['Text', 'Score']].head())
+
 from scipy.cluster.hierarchy import fcluster
 
-max_distance = 15  # Example threshold distance for cutting
-clusters = fcluster(Z, max_distance, criterion='distance')
+#max_distance = 15  # Example threshold distance for cutting
+#clusters = fcluster(Z, max_distance, criterion='distance')
 
 # Alternatively, you can extract a specific number of clusters
-clusters = fcluster(Z, t=5, criterion='maxclust')  # Example for 5 clusters
+clusters = fcluster(Z, t=10, criterion='maxclust')  # Example for 5 clusters
 
-final['Cluster'] = clusters
-# View the number of reviews in each cluster
-print(final['Cluster'].value_counts())
 
 # Example: Print reviews from a specific cluster
 cluster_1_reviews = final[final['Cluster'] == 1]
