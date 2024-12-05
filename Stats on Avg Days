@@ -1,0 +1,8 @@
+# Load the CSV file to inspect its structure
+csv_file_path = '/mnt/data/balanced_complaints.csv'
+
+# Load the data into a DataFrame
+complaints_data = pd.read_csv(csv_file_path)
+
+# Display the first few rows and general info about the dataset to understand its structure
+complaints_data.info(), complaints_data.head()
